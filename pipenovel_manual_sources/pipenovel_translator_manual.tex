@@ -1,0 +1,178 @@
+\documentclass[pdftex,12pt,a4paper]{report} %[12pt,a4paper,twoside,openright]
+\usepackage{natbib}
+\usepackage{multirow}
+\usepackage{qtree}
+\usepackage{tikz}
+\usepackage{url}
+\usepackage{float}
+\usepackage{verbatim}
+\usepackage{acronym}
+\usepackage{xspace}
+%\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{color}
+%\usepackage[utf8]{inputenc}
+
+%\usepackage{multirow}
+%\usepackage{pbox}
+\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
+%\usepackage{titlesec}
+%\usepackage{natbib}
+%\usepackage{xspace}
+%\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+%\renewcommand{\rmdefault}{ptm}
+%\setlength{\parindent}{0cm}
+
+\usepackage{hyperref}
+
+
+\newcommand{\fixme}[1]{{\bf \color{red} [*FIXME* }{\em #1}{\bf \color{red} ]}}
+\newcommand{\fixed}[1]{{\bf \color{blue} [*FIXED?* }{\em #1}{\bf \color{blue} ]}}
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+
+\newcommand{\PET}{\textsc{PET}\xspace}
+\newcommand{\PEJ}{\textsc{PEJ}\xspace}
+\newcommand{\rel}[1]{{\it #1}}
+\newcommand{\param}[2]{{\tt #1=}{\it #2}}
+
+\title{Post-Editing Tool\\PET}
+\date{\today}
+\author{Wilker Aziz\\ Research Group in Computation Linguistics, University of Wolverhampton \and Lucia Specia \\ Computer Science Department, University of Sheffield}
+
+ 
+\definecolor{lightgray}{rgb}{.9,.9,.9}
+\definecolor{darkgray}{rgb}{.4,.4,.4}
+\definecolor{forestGreen}{RGB}{34,139,34}
+\definecolor{orangeRed}{RGB}{255,69,0}
+
+\lstdefinestyle{BashStyle}{
+  language=bash,
+  basicstyle=\small\sffamily,
+  numbers=left,
+  numberstyle=\tiny,
+  numbersep=3pt,
+  frame=tb,
+  columns=fullflexible,
+  backgroundcolor=\color{yellow!20},
+  linewidth=0.9\linewidth,
+  xleftmargin=0.1\linewidth
+}
+
+ 
+
+\lstdefinelanguage{xml}{
+	%basicstyle=\small,
+	sensitive=false,
+}
+ 
+\lstdefinestyle{workflowStyle}{
+	language=XML,
+	%Formatting
+	basicstyle=\scriptsize,
+	sensitive=true,
+	showstringspaces=false,
+	numbers=left,
+	numberstyle=\tiny,
+	tabsize=1,
+	numbersep=3pt,
+	extendedchars=true,
+	xleftmargin=2em,
+	lineskip=1pt,
+	breaklines,
+	captionpos=b,
+	%Coloring
+	backgroundcolor=\color{lightgray},
+	morekeywords={BooleanExpression},
+	alsoletter={:,<,>,/,?},
+	morestring=[b]{"},
+	morecomment=[s]{<!--}{-->},keywordstyle=\color{forestGreen},
+	identifierstyle=\color{blue}\ttfamily,
+	stringstyle=\color{orangeRed}\ttfamily,
+	commentstyle=\color{forestGreen}\ttfamily
+}
+ 
+ 
+\lstnewenvironment{workflow-code}[2]{
+	\lstset{caption=#1,label=#2,style=workflowStyle}
+}{}
+
+
+
+
+
+\begin{document}
+
+\include{title}
+
+\include{contents}
+
+%\input{about}
+
+\input{running}
+
+\input{interface}
+
+%\input{files}
+
+%\input{examples}
+
+%\input{api}
+
+\chapter{Translation Guidelines}
+
+\begin{itemize}
+
+\item Fill-in this questionnaire before starting the translation tasks: \url{https://www.surveymonkey.com/r/TJCPWWM}
+
+\item In this experiment you are to complete a number of \textbf{tasks}. Each task corresponds to the translation of 10 consecutive sentences.
+
+\item The \textbf{type of translation} alternates between tasks. There are 2 types:
+	\begin{enumerate}
+	\item \underline{Translation from scratch}. Only the source sentence is provided, you are to write the translation from 	scratch.
+	\item \underline{Post-editing}. The source sentence is provided alongside a translation produced by an MT system. You are to post-edit this translation. If possible try to fix the translation provided by the MT system. Only if you deem the MT output too time consuming to fix, you can delete it and start from scratch.
+		\begin{itemize}
+			\item Two MT systems, called MT1 and MT2, are used in the experiment. Be aware of which MT system you are post-editing, because at the end of the experiment you will be asked questions about these two systems, e.g. how good/bad they are.
+		\end{itemize}
+	\end{enumerate}
+	
+\item The \textbf{aim} is to produce publishable professional quality translations, both for translations from scratch and for post-editing. Thus, please try to do your very best.
+
+\item The \textbf{time} elapsed to carry out the translations is recorded while the active unit (sentence) is in editing mode (yellow background). Therefore:
+	\begin{itemize}
+	\item Do not start performing a translation until you are in editing mode (yellow background). I.e. do not start thinking how you will tackle the translation of a sentence when the active unit is not in editing mode (green or red background).
+	\item Do not leave a unit in editing mode (yellow background) while you do something else. If you need to do something unrelated in the middle of a translation then go out of editing mode and come back to editing mode when you are ready to resume translating.
+	\end{itemize}
+	
+\item Translations are related to source sentences on a \textbf{1-to-1} basis by default. In other words, each source sentence corresponds to 1 target sentence. In the translation of novels it is not that uncommon to have some cases of many-to-1 (more than 1 source sentence translated as 1 target sentence) or 1-to-many (1 source sentence translated as more than 1 target sentence). While producing 1-to-1 translations is \underline{preferred}, if, for a given input, you deem it very important not to adhere to 1-to-1 equivalence, then proceed as follows:
+	\begin{itemize}
+	\item If you want to split a source sentence in 2 or more target sentences (1-to-many): enter all the target sentences in 1 target sentence box, separated by a newline (enter).
+	\item If you want to join 2 source sentences (S1 and S2) into 1 target sentence (T2), many-to-1: leave the target box that corresponds to S1 (T1) empty. Enter the translation of S1+S2 in the target box that corresponds to S2 (T2). If you want to translate more than 2 sentences into 1, then the same method applies. For example for 3-to-1 you would leave the target boxes of T1 and T2 empty and produce the translation of S1+S2+S3 in the box T3.
+	\end{itemize}
+
+\item Please fill-in this questionnaire after completing the translation tasks: \url{https://www.surveymonkey.com/r/TFT56QW}
+
+\item Send back the results by zipping the PET folder and emailing it.
+\end{itemize}
+
+
+
+\chapter{Conditions}
+
+By taking part in this experiment you give your active informed consent and agree to the following conditions:
+
+\begin{enumerate}
+\item Your translation behaviour (time elapsed and keystrokes) is recorded.
+\item Your translations might be published under a Creative Commons license, acknowledging your authorship.
+\item The log data containing your translation behaviour might be published under a free license for research purposes. Such a dataset would be anonymised.
+\item Your answers to the questionnaire might be published under a free license for research purposes. Such a dataset would be anonymised.
+\item One or more research papers covering the experiments carried out might be published. Your contribution to the experiments would be acknowledged.
+\item You have the right to withdraw your cooperation at any time, and you can do so without any consequences to you.
+\end{enumerate}
+
+
+%\bibliographystyle{apalike}
+%\bibliography{bib}
+
+
+\end{document}

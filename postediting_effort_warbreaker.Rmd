@@ -1,0 +1,740 @@
+---
+title: "Statistical Analyses with Mixed Models of Human Translation versus Post-editing of Warbreaker's chapter 1"
+author: "Antonio Toral and Martijn Wieling"
+date: "Generation date: `r format(Sys.time(), '%b %d, %Y - %H:%M:%S')`"
+output: 
+  html_document:
+    toc: true
+    code_folding: show
+    toc_float: 
+        collapsed: false
+        smooth_scroll: true
+    number_sections: true
+---
+
+
+This document contains the step-by-step statistical analyses of the post-editing (PE) effort experiments described in:
+Toral, A., Wieling, M., and Way, A. (2018, in press). Post-editing effort of a novel with statistical and neural machine translation. Frontiers in Digital Humanities.
+
+Variables used
+- Predictors
+  - Fixed
+    - Length of the source sentence (characters better than words)
+    - tasktype: the translation condition. It is a factor with 3 levels: HT (human translation from scratch), MT1 (post-editing the output of a PBMT system) and MT2 (post-editing the output of a NMT system). The reference level is HT.
+    - trial number (1:330)
+  - Random factors
+    - Subject (6 translators)
+    - Item (330 sentences)
+
+- Dependent variables
+  - Translation time in seconds (temporal effort)
+  - number of keystrokes (technical effort)
+  - number of pauses | avg length of pauses | pause to total time ratio (cognitive effort)
+  
+- Hypothesised interactions
+  - trial*tasktype: does the longitudinal effect depend on translation type?
+  - len_sl_char*tasktype: does translation speed of sentences of different length depend on translation type? Some translators said post-editing is useful only for short sentences.
+
+- Hypothesised random slopes
+  - 1+trial|subject -> longitudinal effect depends on the subject
+  - 1+tasktype|subject -> effect of translation mode depends on subject. MT suggestions may help some translators more than others.
+  - 1+tasktype|item -> effect of translation mode depends on sentence. MT quality varies across sentences.
+
+
+
+
+# Load libraries and install required packages if not installed yet
+```{r message=FALSE}
+# install packages if not there yet
+packages <- c("car", "effects", "ggplot2", "jtools", "lme4", "lmerTest", "mgcv", "optimx", "tidyr")
+if (length(setdiff(packages, rownames(installed.packages()))) > 0) {
+    install.packages(setdiff(packages, rownames(installed.packages())), repos = "http://cran.us.r-project.org")
+}
+
+library(car)
+library(effects)
+library(ggplot2)
+library(jtools)
+library(lme4)
+library(mgcv)
+#library(lmerTest) # load later as interact_plot fails with it loaded
+library(optimx)
+#library(tidyr)
+```
+
+```{r versioninfo}
+# display version information
+R.version.string
+packageVersion('mgcv')
+packageVersion('car')
+packageVersion('lme4')
+packageVersion('mgcv')
+packageVersion('optimx')
+```
+
+# Load dataset
+```{r}
+mydf <- read.csv("warbreaker_t1-6_complete_with_pauses.csv", sep="\t")
+
+# create additional variables (trial number, time and number of keystrokes per character, seconds per keystrokes and words per hour)
+trial <- seq(1:330) # trial number
+mydf <- cbind(mydf,trial)
+
+mydf$time <- mydf$ev_time_ms / 1000 # time from ms to seconds
+mydf$time_h = mydf$time / 3600 # time from seconds to hours
+
+mydf$time_div_len_sl_char = mydf$time / mydf$len_sl_chr # time per character
+mydf$k_total_div_len_sl_char = mydf$k_total / mydf$len_sl_chr # keystrokes per character
+mydf$k_total_div_time = mydf$k_total / mydf$time # keystrokes per second
+mydf$len_sl_word_div_time_hours = mydf$len_sl_wrd / (mydf$time_h) # words per hour
+
+
+# scale the continuous predictors
+mydf$len_sl_chr.s <- scale(mydf$len_sl_chr)
+mydf$len_sl_chr.s = c(mydf$len_sl_chr.s)
+mydf$trial.s <- scale(mydf$trial)
+mydf$trial.s = c(mydf$trial.s)
+```
+
+
+
+# Overall Relative Changes (PE with MT1 and MT2 compared to HT)
+
+Productivity (words processed per hour)
+```{r}
+product_per_tasktype <- tapply(mydf$len_sl_wrd, mydf$tasktype, FUN=sum) / tapply(mydf$time/3600, mydf$tasktype, FUN=sum) #productivity: words/hour
+product_per_tasktype
+for (i in seq(2,3)){
+  print((product_per_tasktype[i] - product_per_tasktype[1]) / product_per_tasktype[1])
+}
+```
+
+Relative changes in productivity: MT1 +18%, MT2 + 36%
+
+
+Temporal effort (seconds per source character)
+```{r}
+temp_eff_per_tasktype <- tapply(mydf$time, mydf$tasktype, FUN=sum) / tapply(mydf$len_sl_chr, mydf$tasktype, FUN=sum) # temp effort: seconds/character
+temp_eff_per_tasktype
+for (i in seq(2,3)){
+  print((temp_eff_per_tasktype[i] - temp_eff_per_tasktype[1]) / temp_eff_per_tasktype[1])
+}
+```
+
+- Temporal reduction: MT1 -17%, MT2 -26%
+
+
+Technical effort (keystrokes per source character)
+```{r}
+tech_eff_per_tasktype <- tapply(mydf$k_total, mydf$tasktype, FUN=sum) / tapply(mydf$len_sl_chr, mydf$tasktype, FUN=sum) # technical effort: keystrokes/character
+tech_eff_per_tasktype
+for (i in seq(2,3)){
+  print((tech_eff_per_tasktype[i] - tech_eff_per_tasktype[1]) / tech_eff_per_tasktype[1])
+}
+```
+
+Keystroke reduction: MT1 -9%, MT2 -23%
+
+
+
+Typing speed (keystrokes per second)
+```{r}
+type_speed_per_tasktype <- tapply(mydf$k_total, mydf$tasktype, FUN=sum) / tapply(mydf$time, mydf$tasktype, FUN=sum) # keystrokes/second
+type_speed_per_tasktype
+for (i in seq(2,3)){
+  print((type_speed_per_tasktype[i] - type_speed_per_tasktype[1]) / type_speed_per_tasktype[1])
+}
+```
+
++9% with PBMT, +5% with NMT.
+
+
+Keywords per type
+```{r}
+attach(mydf)
+kt_content = k_digit + k_letter + k_white + k_symbol
+kt_other = k_nav + k_erase + k_copy + k_cut + k_paste + k_do
+sum(k_total)
+sum(kt_content) / sum(k_total)
+sum(kt_other) / sum(k_total)
+sum(k_nav) / sum(k_total)
+sum(k_erase) / sum(k_total)
+sum(k_copy) / sum(k_total)
+sum(k_copy + k_cut + k_paste + k_do) / sum(k_total)
+
+kcontent_per_char_and_task_type <- tapply(kt_content, tasktype, FUN=sum) / tapply(len_sl_chr, tasktype, FUN=sum)
+  knav_per_char_and_task_type <- tapply(k_nav, tasktype, FUN=sum) / tapply(len_sl_chr, tasktype, FUN=sum)
+  kerase_per_char_and_task_type <- tapply(k_erase, tasktype, FUN=sum) / tapply(len_sl_chr, tasktype, FUN=sum)
+  
+kcontent_per_char_and_task_type
+knav_per_char_and_task_type
+kerase_per_char_and_task_type
+detach(mydf)
+```
+
+
+
+
+# Temporal Effort
+
+## Outliers
+```{r}
+# 1 boxplot per subject and task
+par(mfrow=c(1,2))
+boxplot(mydf$time ~ mydf$subject + mydf$tasktype)
+boxplot(mydf$time_div_len_sl_char ~ mydf$subject + mydf$tasktype, ylim=c(0, 40))
+
+# 1 boxplot per subject
+par(mfrow=c(1,2))
+boxplot(mydf$time ~ mydf$subject)
+boxplot(mydf$time_div_len_sl_char ~ mydf$subject, ylim=c(0, 40))
+
+# 1 boxplot per task
+par(mfrow=c(1,2))
+boxplot(mydf$time ~ mydf$tasktype)
+boxplot(mydf$time_div_len_sl_char ~ mydf$tasktype, ylim=c(0, 40))
+```
+
+There seem to be some outliers, e.g. sentences for which translators take more than 20 seconds per source character.
+
+We check the number of keystrokes per second for these data points.
+```{r}
+mydf[mydf$time_div_len_sl_char > 20,]$k_total_div_time
+mydf[mydf$time_div_len_sl_char > 20,]$tasktype
+```
+
+The number of keystrokes/second (1.3 to 1.4) is close to the average: between 1.5 and 1.6 (depending on the translation method). We conclude then that these translations took a long time because the translators tried different ways of translating the source sentences. Hence, they are valid data points and we do not remove them.
+
+
+
+## Dependent Variable Transformation
+
+The dependent variable (translation time) has a very long right tail. Hence we transform it logarithmically.
+
+```{r}
+mydf$time.l <- log(mydf$time)
+par(mfrow=c(1,2))
+plot(density(mydf$time))
+plot(density(mydf$time.l))
+```
+
+
+## LMER: Fixed Effects
+```{r}
+te.lmer0 = lmer(time.l ~ len_sl_chr.s + (1|subject) + (1|item), mydf, REML=F)
+
+te.lmer1 = lmer(time.l ~ len_sl_chr.s + tasktype + (1|subject) + (1|item), mydf, REML=F)
+AIC(te.lmer0) - AIC(te.lmer1) #80
+
+te.lmer2 = lmer(time.l ~ len_sl_chr.s + tasktype + trial.s + (1|subject) + (1|item), mydf, REML=F)
+AIC(te.lmer1) - AIC(te.lmer2) #18
+
+summary(te.lmer2)
+```
+
+All the predictors are significant (|t|>2).
+
+
+## LMER: Interactions of Fixed Effects
+```{r}
+te.lmer3a = lmer(time.l ~ len_sl_chr.s + tasktype * trial.s + (1|subject) + (1|item), mydf, REML=F)
+summary(te.lmer3a)
+AIC(te.lmer2) - AIC(te.lmer3a) #1.3
+
+plot(effect("tasktype:trial.s", te.lmer3a))
+interact_plot(te.lmer3a, pred = trial.s, modx = tasktype)
+```
+
+The slopes look different, indicating that e.g. translators speed up throughout the task more for MT1 and HT than for MT2. However, these differences are not significant. Even if the t of the coefficient for the interaction tasktypemt2:trial.s >2 the resulting model is not better (AIC diff 1.3<2). Therefore we do not keep the interaction.
+
+
+```{r}
+te.lmer3b = lmer(time.l ~ tasktype * `len_sl_chr.s` + trial.s + (1|subject) + (1|item), mydf, REML=F)
+summary(te.lmer3b)
+AIC(te.lmer2) - AIC(te.lmer3b) #3.5
+plot(effect("tasktype:len_sl_chr.s", te.lmer3b))
+
+interact_plot(te.lmer3b, pred = len_sl_chr.s, modx = tasktype, y.label = "time (log)", x.label = "character source length (scaled)", legend.main = "condition")
+#dev.copy(pdf,"te_interaction_tasktype_len.pdf", width=6, height=4)
+#dev.off()
+
+
+
+#TODO model with predictors not scaled and dependent varaible without log
+# head(mydf$len_sl_chr.s * attr(mydf$len_sl_chr.s, 'scaled:scale') + attr(mydf$len_sl_chr.s, 'scaled:center'))
+# head(mydf$len_sl_chr)
+# 
+# unscale <- function (x){
+#   return(c(x * attr(x, 'scaled:scale') + attr(x, 'scaled:center')))
+# }
+# 
+# interact_plot(te.lmer3b, pred = unscale(`len_sl_chr.s`), modx = tasktype, y.label = "time (log)", x.label = "character source length (scaled)", legend.main = "condition")
+```
+
+The hypothesis that the longer the sentence the least useful is post-editing is confirmed: while for short sentences post-editing takes shorter compared to HT, this difference gets reduced as sentences become longer. The interaction is significant for MT2 compared to HT but not for MT1 compared to HT. This links to the previous finding that NMT underperforms for long sentences (Toral and Sánchez-Cartagena, 2017).
+
+
+```{r}
+te.lmer3c = lmer(time ~ tasktype * len_sl_chr.s + tasktype*trial.s + (1|subject) + (1|item), mydf, REML=F)
+AIC(te.lmer3b) - AIC(te.lmer3c) #-18048!
+```
+
+Both interactions do not result in a better model.
+
+
+
+## LMER: Random Effects
+
+```{r}
+ranef(te.lmer3b)$subject
+```
+
+We can observe that the adjustments for specific subjects to the intercept are slightly different, negative for T1 and T2 and positive for the remaining four.
+
+
+Now we check whether the addition of random slopes results in a better model.
+```{r}
+te.lmer3bREML = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1|item), mydf, REML=T)
+
+#subject
+te.lmer4a = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (0+trial.s|subject) + (1|item), mydf, REML=T)
+AIC(te.lmer3bREML) - AIC(te.lmer4a) #0.11
+
+te.lmer4b = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+trial.s|subject), mydf, REML=T)
+AIC(te.lmer3bREML) - AIC(te.lmer4b) # -216
+
+te.lmer4c = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|subject), mydf, REML=T)
+AIC(te.lmer3bREML) - AIC(te.lmer4c) # -224
+
+
+#item
+te.lmer5a = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1|item) + (0+trial.s|item), mydf, REML=T)
+AIC(te.lmer3bREML) - AIC(te.lmer5a) #-2
+
+te.lmer5b = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|item), mydf, REML=T)
+AIC(te.lmer3bREML) - AIC(te.lmer5b) #8
+
+te.lmer6 = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+trial.s+tasktype|item), mydf, REML=T)
+AIC(te.lmer5b) - AIC(te.lmer6) #-3
+
+summary(te.lmer5b) # the best model thus far
+```
+
+The only random slope that results in a better model is a by-item random slope for tasktype.
+The variance of this slope is much higher for level mt1 (0.08) than for level mt2 (0.03). This indicates that there is more variation in time across sentences with mt1 than with mt2.
+
+
+
+## LMER Assumptions
+```{r}
+# heterodasticity
+plot(fitted(te.lmer5b), resid(te.lmer5b))
+
+# normality
+qqp(resid(te.lmer5b))
+```
+
+Heterodasticity looks fine but the distribution of residuals deviates from normality.
+
+
+
+## Model criticism
+```{r}
+# Remove outliers
+mydfno = mydf[abs(scale(resid(te.lmer5b))) < 2.5,]
+dim(mydfno) - dim(mydf)
+1 - (dim(mydfno)/dim(mydf))# 2.8% of the data points are removed
+
+# Fit model on data without outliers
+library(lmerTest)
+te.lmer5bno =   lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|item), mydfno, REML=T)
+
+# Check normality
+par(mfrow=c(1,2))
+qqp(resid(te.lmer5b))
+qqp(resid(te.lmer5bno)) # Normality looks fine in the model without outliers.
+summary(te.lmer5bno)
+```
+
+All the predictors and interactions that were significant remain so in the model without outliers.
+
+
+
+
+## Variance Explained and Significance
+
+Percentage of variance explained by the models with and without outliers
+```{r}
+cor(mydf$time.l, fitted(te.lmer5b))^2 # 0.68
+cor(mydfno$time.l, fitted(te.lmer5bno))^2 # 0.76
+```
+
+
+Use MT1 as reference level of translation condition, to check if MT2 is significantly different than MT1.
+```{r}
+mydfno$tasktype <- relevel(mydfno$tasktype, "mt1")
+te.lmer5bno_mt1 = lmer(time.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|item), mydfno, REML=T)
+summary(te.lmer5bno_mt1)
+mydfno$tasktype <- relevel(mydfno$tasktype, "ht")
+```
+
+We do two comparisons for the significance of translation condition for level MT2: MT2 vs HT (< 2e-16) and MT2 vs MT1 (0.0368). Thus we need to correct for multiple comparisons, which we do with Holm-Bonferroni.
+
+```{r}
+p.adjust(c(0.019, 0.0368), method = "holm")
+```
+
+p (MT2 vs HT) < 0.001
+p (MT2 vs MT1) < 0.05
+
+
+
+To conclude with temporal effort, we report the time in each condition according to the model without outliers and their relative differences.
+
+```{r}
+exp(3.92013)          #HT:  50.4
+exp(3.92013-0.22344)  #MT1: 40.3
+exp(3.92013-0.30476)  #MT2: 37.2
+
+(exp(3.92013-0.22344)-exp(3.92013))/exp(3.92013) #MT1 vs HT: -20%
+(exp(3.92013-0.30476)-exp(3.92013))/exp(3.92013) #MT2 vs HT: -26%
+(exp(3.92013-0.30476)-exp(3.92013-0.22344))/exp(3.92013-0.22344) #MT2 vs MT1: -8%
+```
+
+
+
+
+
+
+
+
+
+
+
+# Technical Effort
+
+## Dependent Variable
+
+Our dependent variable is the total number of keystrokes, count data, and therefore we will apply Poisson regression, with glmer.
+
+For translation units not translated 1-to-1 the number keystrokes are averaged as part of the post-processing, therefore for those data points we have fractional number of keystrokes, which we round.
+
+```{r}
+mydf$k_total.r <- round(mydf$k_total)
+```
+
+
+## GLMER: Fixed Effects
+
+```{r}
+cor(mydf$time,mydf$k_total) # strong correlation (0.78), so we should expect similar results to temporal effort.
+
+ke.glmer0 = glmer(k_total.r ~ len_sl_chr.s + trial.s + tasktype + (1|subject) + (1|item), data=mydf,family='poisson')
+summary(ke.glmer0)
+```
+
+All the predictors are significant.
+
+
+## GLMER: Interaction of Fixed Effects
+```{r}
+ke.glmer1a = glmer(k_total.r ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1|item), data=mydf,family='poisson')
+AIC(ke.glmer0) - AIC(ke.glmer1a) #467
+
+ke.glmer1b = glmer(k_total.r ~ len_sl_chr.s + tasktype * trial.s + (1|subject) + (1|item), data=mydf,family='poisson')
+AIC(ke.glmer0) - AIC(ke.glmer1b) #109
+
+ke.glmer1c = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (1|subject) + (1|item), data=mydf, family='poisson')
+AIC(ke.glmer1a) - AIC(ke.glmer1c) #102
+AIC(ke.glmer1b) - AIC(ke.glmer1c) #461
+summary(ke.glmer1c)
+```
+
+The two possible 2-way interactions involving translation condition are significant as is the model that has them both.
+
+Sentence length: the number of keystrokes increases in general (0.6). Compared to HT, it does so more for MT1 (0.01) and considerably more so for MT2 (0.12).
+Trial: the number of keystrokes decreases in general (-0.1). It decreases more than at the reference level (HT) for MT1 (-0.03) and less than at the reference level for MT2 (0.03)
+
+
+```{r}
+plot(effect("tasktype:len_sl_chr.s", ke.glmer1c))
+
+interact_plot(ke.glmer1a, pred = len_sl_chr.s, modx = tasktype, y.label = "number of keystrokes (log)", x.label = "character source length (scaled)", legend.main = "condition", outcome.scale = "link", scale=T)
+#dev.copy(pdf,"technical_interaction_tasktype_len.pdf", width=6, height=4)
+#dev.off()
+#TODO model with predictors not scaled and dependent varaible without log
+
+plot(effect("tasktype:trial.s", ke.glmer1c))
+interact_plot(ke.glmer1c, pred = trial.s, modx = tasktype, y.label = "number of keystrokes", x.label = "trial number (scaled)", legend.main = "condition")
+```
+
+Length. With longer sentences post-editing with MT2 becomes less effective, i.e. requires more keystrokes.
+Trial. The number of keystrokes gets reduced more with MT1 than with HT and MT2. With HT the number of keystrokes gets reduced more than with MT2.
+
+
+## GLMER: Random Effects
+```{r}
+ranef(ke.glmer1c)$subject
+```
+We can observe that the adjustments for specific subjects to the intercept are rather different.
+
+
+```{r, cache=TRUE}
+#subject
+ke.glmer2a = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (1+tasktype|subject) + (1|item), data=mydf,family='poisson',glmerControl(optimizer='bobyqa'))
+AIC(ke.glmer1c) - AIC(ke.glmer2a) #2982
+
+ke.glmer2b = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (0+trial.s|subject) + (1|subject) + (1|item), data=mydf,family='poisson')
+AIC(ke.glmer1c) - AIC(ke.glmer2b) #465
+
+ke.glmer2c = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (1+trial.s|subject) + (1|item), data=mydf,family='poisson')
+AIC(ke.glmer2b) - AIC(ke.glmer2c) #-1.7
+
+ke.glmer2d = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (0+len_sl_chr.s|subject) + (1|item), data=mydf,family='poisson')
+AIC(ke.glmer1c) - AIC(ke.glmer2d) #-9913
+
+ke.glmer2e = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1|item), data=mydf,family='poisson',glmerControl(optimizer='bobyqa'))
+AIC(ke.glmer2b) - AIC(ke.glmer2e) #2900
+AIC(ke.glmer2a) - AIC(ke.glmer2e) #382
+
+# best model (2e) adding random slope tasktype (in interaction) and trial (without interaction) with subject
+
+
+# item
+ke.glmer3a = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (1|subject) + (1+tasktype|item), data=mydf,family='poisson')
+AIC(ke.glmer1c) - AIC(ke.glmer3a) #22128
+
+ke.glmer3b = glmer(k_total.r ~ tasktype * len_sl_chr.s + tasktype * trial.s + (1|subject) + (0+trial.s|item) + (1+tasktype|item), data=mydf,family='poisson',glmerControl(optimizer='bobyqa'))
+AIC(ke.glmer3a) - AIC(ke.glmer3b) #-2
+
+# best model for item: random slope tasktype (3a)
+
+ke.glmer4a = glmer(k_total.r ~ tasktype * len_sl_chr.s  + tasktype * trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1+tasktype|item), data=mydf,family='poisson',glmerControl(optimizer='bobyqa'))
+AIC(ke.glmer3a) - AIC(ke.glmer4a) #3156
+AIC(ke.glmer2e) - AIC(ke.glmer4a) #21919
+summary(ke.glmer4a)
+```
+
+Trial*tasktype interaction is not significant anymore. Let's fit a model without it.
+
+```{r, cache=TRUE}
+ke.glmer5a = glmer(k_total.r ~ tasktype * len_sl_chr.s  + trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1+tasktype|item),
+            data=mydf,family=poisson,control=glmerControl(optimizer='optimx',optCtrl=list(method='nlminb')))
+AIC(ke.glmer4a) - AIC(ke.glmer5a) #3.6
+summary(ke.glmer5a)
+
+#variance in by-subject slope trial is quite low (0.003). Let's see if we can simplify the model by removing it.
+ke.glmer6a = glmer(k_total.r ~ tasktype * len_sl_chr.s  + trial.s + (1+tasktype|subject) + (1+tasktype|item),
+            data=mydf,family=poisson,control=glmerControl(optimizer='optimx',optCtrl=list(method='nlminb')))
+AIC(ke.glmer5a) - AIC(ke.glmer6a) #-344. We need the slope
+```
+
+Random slopes that result in a better model: by-subject for tasktype and trial, by-item for tasktype.
+
+Variance of slope tasktype by-subject is much higher for level mt2 (0.14) than for level mt1 (0.08). There is more variation in the number of keystrokes across subjects with mt2 than with mt1.
+
+
+
+
+We refit the best model (5a) with MT1 as the reference level of translation condition so that we can check if the difference between MT1 and MT2 is significant
+```{r, cache=TRUE}
+cor(mydf$k_total, fitted(ke.glmer5a))^2 # 0.74 # % explained variance of data
+mydf$tasktype <- relevel(mydf$tasktype, "mt1")
+ke.glmer5a_mt1 = glmer(k_total.r ~ tasktype * len_sl_chr.s  + trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1+tasktype|item),
+            data=mydf,family=poisson,control=glmerControl(optimizer='optimx',optCtrl=list(method='nlminb')))
+summary(ke.glmer5a_mt1)
+mydf$tasktype <- relevel(mydf$tasktype, "ht")
+```
+
+
+
+We do two comparisons for the significance of translation condition for level MT2: MT2 vs HT (0.000608) and MT2 vs MT1 (). Thus we need to correct for multiple comparisons, which we do with Holm-Bonferroni.
+
+```{r}
+p.adjust(c(0.000608, 0.00985), method = "holm")
+```
+
+p (MT2 vs HT) < 0.01
+p (MT2 vs MT1) < 0.01
+
+
+
+
+
+
+# 5. Cognitive Effort
+
+We use pauses as a proxy to measure cognitive effort (Schilperoord, 1996; O'Brien, 2006).
+
+We consider three different ways of expressing the dependent variable (Green et al., 2013):
+- count: number of pauses (np)
+- mean length/duration: how long each pause takes (mlp)
+- ratio: time devoted to pauses divided by total translation time
+
+We use a threshold of 300ms, i.e. only pauses longer than 300ms are considered (Lacruz et al., 2014).
+
+Expectations (as found in previous work):
+- less pauses in PE
+- longer pauses in PE
+- higher percentage of time devoted to pauses in PE
+
+
+
+## Number of pauses
+
+```{r}
+cor(mydf$np_300,mydf$k_total) # 0.9
+```
+
+The number of pauses correlates strongly with the number of keystrokes (R = 0.9). Due to this and because number of pauses is a count dependent variable, we will use the GLMER model previously built for technical effort (Poisson).
+
+```{r, cache=TRUE}
+ce.glmer5a_300 = glmer(round(np_300) ~ tasktype * len_sl_chr.s  + trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1+tasktype|item),
+            data=mydf,family=poisson,control=glmerControl(optimizer='optimx',optCtrl=list(method='nlminb')))
+summary(ce.glmer5a_300)
+
+mydf$tasktype <- relevel(mydf$tasktype, "mt1")
+ce.glmer5a_300_mt1 = glmer(round(np_300) ~ tasktype * len_sl_chr.s  + trial.s + (0+trial.s|subject) + (1+tasktype|subject) + (1+tasktype|item),
+            data=mydf,family=poisson,control=glmerControl(optimizer='optimx',optCtrl=list(method='nlminb')))
+summary(ce.glmer5a_300_mt1)
+mydf$tasktype <- relevel(mydf$tasktype, "ht")
+```
+
+There are significantly less pauses with MT1 than with HT and even less with MT2, the difference between MT1 and MT2 is also significant. This corroborates the results by Green et al. (2013), i.e. PE leads to less pauses than HT.
+
+Next we interpret the coefficients.
+```{r}
+exp(2.72939) #HT
+exp(2.72939-0.33709) #MT1
+exp(2.72939-0.55782) #MT2
+
+(exp(2.72939-0.33709)-exp(2.72939))/exp(2.72939) #-29
+(exp(2.72939-0.55782)-exp(2.72939))/exp(2.72939) #-43
+```
+
+Number of pauses in condition HT: 15.3. MT1: 10.9 (-29%). MT2: 8.8 (-43%).
+
+
+## Mean duration of pauses
+
+```{r}
+# we create a new variable for mean pause duration
+mydfp = mydf[mydf$np_1000 > 0,] # subset of datapoints with pauses
+(nrow(mydfp) - nrow(mydf)) / nrow(mydf) # 5% of the data points are removed
+
+mydfp$mlp_300 <- mydfp$lp_300 / (mydfp$np_300)
+```
+
+```{r}
+cor(mydfp$mlp_300,mydfp$time) # 0.25
+cor(mydfp$mlp_300,mydfp$time.l) # 0.25
+cor(mydfp$mlp_300,mydfp$k_total) # -0.02
+cor(mydfp$mlp_300,mydfp$lp_300) # 0.29
+
+mydfp$mlp_300.l <- log(mydfp$mlp_300)
+
+par(mfrow=c(1,2))
+plot(density(mydfp$mlp_300))
+plot(density(mydfp$mlp_300.l))
+```
+
+The mean duration of pauses correlates weakly with translation time (R = 0.25) and does not correlate with number of keystrokes (R = -0.02). We fit the mean duration of pauses with the model previously bulit to predict translation time (temporal effort).
+
+```{r}
+ce_mlp.lmer5b_300 = lmer(mlp_300.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|item), mydfp, REML=T)
+summary(ce_mlp.lmer5b_300)
+
+mydfp$tasktype <- relevel(mydfp$tasktype, "mt1")
+ce_mlp.lmer5b_300_mt1 = lmer(mlp_300.l ~ tasktype * len_sl_chr.s + trial.s + (1|subject) + (1+tasktype|item), mydfp, REML=T)
+summary(ce_mlp.lmer5b_300_mt1)
+mydfp$tasktype <- relevel(mydfp$tasktype, "ht")
+```
+
+Compared to HT, the mean duration of pauses is significantly longer with MT1, and even longer with MT2. The difference between MT1 and MT2 is significant too.
+
+```{r}
+exp(7.71550) #HT: 2243
+
+exp(7.71550+0.13181) #MT1: 2259
+(exp(7.71550+0.13181)-exp(7.71550))/exp(7.71550) #MT1 vs HT: +14%
+
+exp(7.71550+0.22556) #MT2: 2910
+(exp(7.71550+0.22556)-exp(7.71550))/exp(7.71550) #MT2 vs HT: +25%
+(exp(7.71550+0.22556)-exp(7.71550+0.13181))/exp(7.71550-0.27217) #MT2 vs MT1: +15%
+```
+
+The mean duration of pauses is higher with MT1 (2559ms, 14%) and even higher with MT2 (2810ms, 25%) compared to HT (2243ms).
+
+
+
+
+## Ratio of pauses
+
+
+```{r}
+mydfp$rp_300 <- mydfp$lp_300 / (mydfp$ev_time_ms)
+summary(mydfp$rp_300)
+```
+
+```{r}
+cor(mydfp$rp_300,mydfp$time) # 0.42
+cor(mydfp$rp_300,mydfp$time.l) # 0.57
+cor(mydfp$rp_300,mydfp$k_total) # 0.31
+cor(mydfp$rp_300,mydfp$lp_300) # 0.5
+```
+
+Correlation with time is the highest (R=0.57). We will use almost the same predictors, interactions and slopes as in the model used for temporal effort (the model with exactly the same predictors does not converge and therefore we remove the interaction and the slope).
+
+Our reponse variable is a proportion, therefore we use beta regression. There is no implementation of beta regression in lmer, but there is in gam.
+```{r, cache=TRUE}
+m0 = bam(rp_300 ~ len_sl_chr.s + tasktype + trial.s + s(subject,bs='re') + s(item,bs="re"), data=mydfp, family=betar(link="logit"))
+summary(m0)
+#library(itsadug)
+#plot_smooth(m0,view="len_sl_chr.s",rug=F,plot_all="tasktype",transform=plogis)
+
+mydfp$tasktype <- relevel(mydfp$tasktype, "mt1")
+m0_mt1 = bam(rp_300 ~ len_sl_chr.s + tasktype + trial.s + s(len_sl_chr.s,by=tasktype) + s(subject,bs='re') + s(item,bs="re"), data=mydfp, family=betar(link="logit"))
+summary(m0_mt1)
+mydfp$tasktype <- relevel(mydfp$tasktype, "ht")
+```
+
+
+We do two comparisons for the significance of translation condition for level MT2: MT2 vs HT (0.01729) and MT2 vs MT1 (0.71490). Thus we need to correct for multiple comparisons, which we do with Holm-Bonferroni.
+
+```{r}
+p.adjust(c(0.01729, 0.71490), method = "holm")
+```
+
+p (MT2 vs HT) < 0.05
+p (MT2 vs MT1) > 0.1
+
+
+```{r}
+plogis(0.53)
+plogis(0.53+0.11619)
+plogis(0.53+0.10143)
+```
+
+Intercept = HT (63%). Pause ratio higher with MT1 (65.6) and MT2 (65.3). Both differences are significant. The difference between MT1 and MT2 is not significant.
+
+
+
+
+## Distribution of pauses across conditions
+
+Finally we show the distribution of pauses across conditions for each pause-related dependent variable considered: number of pauses, their duration and ratio.
+
+```{r}
+plot(density(mydfp[mydfp$tasktype=="ht",]$np_300), col="red", ylim=c(0,0.05), xlim=c(0,60),  main="") # number of pauses
+lines(density(mydfp[mydfp$tasktype=="mt1",]$np_300), col="green")
+lines(density(mydfp[mydfp$tasktype=="mt2",]$np_300), col="blue")
+
+plot(density(mydfp[mydfp$tasktype=="ht",]$mlp_300), col="red", xlim=c(0,15000),  main="") # mean pause duration
+lines(density(mydfp[mydfp$tasktype=="mt1",]$mlp_300), col="green")
+lines(density(mydfp[mydfp$tasktype=="mt2",]$mlp_300), col="blue")
+
+plot(density(mydfp[mydfp$tasktype=="ht",]$rp_300), col="red", ylim=c(0,2.5),  main="") # pause ratio
+lines(density(mydfp[mydfp$tasktype=="mt1",]$rp_300), col="green")
+lines(density(mydfp[mydfp$tasktype=="mt2",]$rp_300), col="blue")
+```
+
